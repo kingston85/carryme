@@ -19,6 +19,8 @@ class _DriverVehicleScreenState extends State<DriverVehicleScreen> {
   late VehicleType _type;
   late final TextEditingController _model;
   late final TextEditingController _plate;
+  late final TextEditingController _color;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -26,14 +28,34 @@ class _DriverVehicleScreenState extends State<DriverVehicleScreen> {
     final drv = context.read<DriverController>();
     _type = drv.vehicle;
     _model = TextEditingController(text: drv.vehicleModel);
-    _plate = TextEditingController(text: drv.plate);
+    _plate = TextEditingController(text: drv.plate == 'No plate set' ? '' : drv.plate);
+    _color = TextEditingController(text: drv.colorName);
   }
 
   @override
   void dispose() {
     _model.dispose();
     _plate.dispose();
+    _color.dispose();
     super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_model.text.trim().isEmpty || _plate.text.trim().isEmpty) {
+      showSnack(context, 'Enter the make/model and number plate.');
+      return;
+    }
+    setState(() => _saving = true);
+    final error = await context.read<DriverController>().setVehicle(
+          type: _type,
+          model: _model.text.trim(),
+          plateNo: _plate.text.trim().toUpperCase(),
+          color: _color.text.trim(),
+        );
+    if (!mounted) return;
+    setState(() => _saving = false);
+    showSnack(context, error ?? 'Vehicle saved');
+    if (error == null) Navigator.pop(context);
   }
 
   @override
@@ -89,18 +111,21 @@ class _DriverVehicleScreenState extends State<DriverVehicleScreen> {
               border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(14))),
             ),
           ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _color,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              labelText: 'Colour',
+              hintText: 'e.g. Yellow',
+              border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(14))),
+            ),
+          ),
           const SizedBox(height: 20),
           PrimaryButton(
             label: 'Save vehicle',
-            onPressed: () {
-              context.read<DriverController>().setVehicle(
-                    type: _type,
-                    model: _model.text.trim(),
-                    plateNo: _plate.text.trim().toUpperCase(),
-                  );
-              showSnack(context, 'Vehicle saved');
-              Navigator.pop(context);
-            },
+            loading: _saving,
+            onPressed: _save,
           ),
         ],
       ),

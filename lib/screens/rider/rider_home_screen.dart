@@ -40,6 +40,10 @@ class _RiderHomeScreenState extends State<RiderHomeScreen> {
   void initState() {
     super.initState();
     _locate();
+    // Live mode: reopen a ride that was still going when the app closed.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<RideController>().resumeIfAny();
+    });
   }
 
   Future<void> _locate() async {

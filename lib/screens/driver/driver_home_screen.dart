@@ -14,6 +14,7 @@ import '../../utils/launch.dart';
 import '../../widgets/app_map.dart';
 import '../../widgets/common.dart';
 import 'driver_drawer.dart';
+import 'driver_vehicle_screen.dart';
 
 class DriverHomeScreen extends StatefulWidget {
   const DriverHomeScreen({super.key});
@@ -27,11 +28,17 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   bool _mapReady = false;
   LatLng _me = AppConfig.monroviaCenter;
   DriverStage? _lastStage;
+  bool _accepting = false;
 
   @override
   void initState() {
     super.initState();
     _locate();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final user = context.read<AppState>().user;
+      if (user != null) context.read<DriverController>().attach(name: user.name, phone: user.phone);
+    });
   }
 
   Future<void> _locate() async {
@@ -55,6 +62,14 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
     final drv = context.watch<DriverController>();
     final app = context.watch<AppState>();
     final job = drv.job;
+
+    final notice = drv.notice;
+    if (notice != null) {
+      drv.clearNotice();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) showSnack(context, notice);
+      });
+    }
 
     if (drv.stage != _lastStage) {
       _lastStage = drv.stage;
@@ -141,6 +156,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
   }
 
   Widget _idlePanel(DriverController drv, AppState app) {
+    if (drv.live && !drv.approved) return _pendingApprovalPanel(drv);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -178,7 +194,7 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
           children: [
             _stat('Today', Money.lrd(drv.todayEarnings)),
             _stat('Trips', '${drv.todayTrips.length}'),
-            _stat('Rating', '4.9 ★'),
+            _stat('Rating', '${drv.rating.toStringAsFixed(1)} ★'),
           ],
         ),
         const SizedBox(height: 14),
@@ -253,7 +269,16 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
           children: [
             Expanded(child: SecondaryButton(label: 'Decline', color: AppColors.red, onPressed: drv.decline)),
             const SizedBox(width: 10),
-            Expanded(flex: 2, child: PrimaryButton(label: 'Accept', icon: Icons.check, color: AppColors.green, onPressed: drv.accept)),
+            Expanded(
+              flex: 2,
+              child: PrimaryButton(
+                label: 'Accept',
+                icon: Icons.check,
+                color: AppColors.green,
+                loading: _accepting,
+                onPressed: () => _accept(drv),
+              ),
+            ),
           ],
         ),
       ],
@@ -269,6 +294,10 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         Text('Pick up ${j.riderName}', style: AppText.h2),
         const SizedBox(height: 4),
         Text('at ${j.pickup.fullLabel}', style: AppText.muted),
+        if (j.note.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Text('Note: "${j.note}"', style: const TextStyle(fontWeight: FontWeight.w600)),
+        ],
         const SizedBox(height: 14),
         Row(
           children: [
@@ -284,7 +313,9 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
               child: SecondaryButton(
                 label: 'Call rider',
                 icon: Icons.call,
-                onPressed: () => showSnack(context, 'Calls are routed through CarryMe in the live app.'),
+                onPressed: j.riderPhone.isEmpty
+                    ? () => showSnack(context, 'Demo rider - no phone number.')
+                    : () => Launch.call(context, j.riderPhone),
               ),
             ),
           ],
@@ -308,12 +339,14 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
         const Text('Waiting for rider', style: AppText.h2),
         const SizedBox(height: 4),
         Text('Ask ${j.riderName} for their 4-digit ride PIN before they get in.', style: AppText.muted),
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(color: AppColors.amberSoft, borderRadius: BorderRadius.circular(10)),
-          child: Text('Demo: the rider\'s PIN is ${j.pin}', style: const TextStyle(fontWeight: FontWeight.w600)),
-        ),
+        if (j.pin.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: AppColors.amberSoft, borderRadius: BorderRadius.circular(10)),
+            child: Text('Demo: the rider\'s PIN is ${j.pin}', style: const TextStyle(fontWeight: FontWeight.w600)),
+          ),
+        ],
         const SizedBox(height: 14),
         PrimaryButton(label: 'Enter PIN & start trip', icon: Icons.pin, onPressed: () => _enterPin(drv)),
         TextButton(
@@ -346,6 +379,46 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
           color: AppColors.green,
           onPressed: () => _complete(drv),
         ),
+      ],
+    );
+  }
+
+  Future<void> _accept(DriverController drv) async {
+    setState(() => _accepting = true);
+    final error = await drv.accept();
+    if (!mounted) return;
+    setState(() => _accepting = false);
+    if (error != null) showSnack(context, error);
+  }
+
+  Widget _pendingApprovalPanel(DriverController drv) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.hourglass_top, color: AppColors.amber),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(drv.profileLoading ? 'Loading your account…' : 'Waiting for approval', style: AppText.h2),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          'Before you can take rides, CarryMe checks your documents and vehicle. '
+          'Add your vehicle details and documents from the menu. We will switch you on once everything is verified.',
+          style: AppText.muted,
+        ),
+        const SizedBox(height: 16),
+        SecondaryButton(
+          label: 'Add vehicle details',
+          icon: Icons.directions_car_outlined,
+          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DriverVehicleScreen())),
+        ),
+        const SizedBox(height: 10),
+        PrimaryButton(label: 'Go online', icon: Icons.power_settings_new, onPressed: null),
       ],
     );
   }
@@ -387,7 +460,8 @@ class _DriverHomeScreenState extends State<DriverHomeScreen> {
       ),
     );
     if (pin == null || !mounted) return;
-    if (!drv.startTrip(pin)) showSnack(context, 'Wrong PIN. Check you have the right rider.');
+    final ok = await drv.startTrip(pin);
+    if (!ok && mounted) showSnack(context, 'Wrong PIN (or no connection). Check you have the right rider.');
   }
 
   Future<void> _complete(DriverController drv) async {

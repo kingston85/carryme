@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../backend/backend.dart';
+import '../../backend/firestore_api.dart';
+import '../../backend/phone_auth.dart';
 import '../../config/app_config.dart';
 import '../../state/app_state.dart';
 import '../../theme/app_theme.dart';
@@ -22,15 +25,44 @@ class OtpScreen extends StatefulWidget {
 
 class _OtpScreenState extends State<OtpScreen> {
   final _code = TextEditingController();
+  final PhoneAuth _auth = PhoneAuth();
   int _resendIn = 30;
   Timer? _timer;
   bool _verifying = false;
+  bool _sending = false;
+  bool _finished = false;
   String? _error;
+
+  bool get _live => Backend.enabled;
 
   @override
   void initState() {
     super.initState();
+    _send();
+  }
+
+  void _send() {
     _startTimer();
+    if (!_live) return;
+    setState(() {
+      _sending = true;
+      _error = null;
+    });
+    _auth.sendCode(
+      widget.phone,
+      onCodeSent: () {
+        if (mounted) setState(() => _sending = false);
+      },
+      onAutoVerified: _signedIn,
+      onError: (m) {
+        if (mounted) {
+          setState(() {
+            _sending = false;
+            _error = m;
+          });
+        }
+      },
+    );
   }
 
   void _startTimer() {
@@ -50,20 +82,47 @@ class _OtpScreenState extends State<OtpScreen> {
   }
 
   Future<void> _verify() async {
+    if (_verifying || _finished) return;
     setState(() {
       _verifying = true;
       _error = null;
     });
-    await Future<void>.delayed(const Duration(milliseconds: 700));
+    String? error;
+    if (_live) {
+      error = await _auth.verify(_code.text);
+    } else {
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      if (_code.text.trim() != AppConfig.demoOtp) error = 'That code is not correct. Try again.';
+    }
     if (!mounted) return;
-    // DEMO: replace with real SMS verification (e.g. Firebase phone auth).
-    if (_code.text.trim() != AppConfig.demoOtp) {
+    if (error != null) {
       setState(() {
         _verifying = false;
-        _error = 'That code is not correct. Try again.';
+        _error = error;
       });
       return;
     }
+    await _signedIn();
+  }
+
+  /// Saves the profile and opens the app (called after manual or automatic verification).
+  Future<void> _signedIn() async {
+    if (_finished || !mounted) return;
+    _finished = true;
+    setState(() => _verifying = true);
+    if (_live) {
+      try {
+        await FirestoreApi.saveUser(
+          name: widget.name,
+          phone: widget.phone,
+          role: widget.mode == AppMode.driver ? 'driver' : 'rider',
+        ).timeout(const Duration(seconds: 10));
+      } catch (e) {
+        // The profile write is retried by Firestore when the network returns.
+        debugPrint('CarryMe: profile save delayed: $e');
+      }
+    }
+    if (!mounted) return;
     context.read<AppState>().login(name: widget.name, phone: widget.phone, asMode: widget.mode);
     Navigator.of(context).popUntil((r) => r.isFirst);
   }
@@ -78,21 +137,28 @@ class _OtpScreenState extends State<OtpScreen> {
         children: [
           const Text('Enter the code', style: AppText.h1),
           const SizedBox(height: 8),
-          Text('We sent a 6-digit code by SMS to ${LiberiaPhone.pretty(widget.phone)}.', style: AppText.muted),
-          const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: AppColors.amberSoft, borderRadius: BorderRadius.circular(12)),
-            child: const Row(
-              children: [
-                Icon(Icons.info_outline, color: AppColors.amber, size: 20),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text('Demo build: use code ${AppConfig.demoOtp}', style: TextStyle(fontWeight: FontWeight.w600)),
-                ),
-              ],
-            ),
+          Text(
+            _sending
+                ? 'Sending a code to ${LiberiaPhone.pretty(widget.phone)}…'
+                : 'We sent a 6-digit code by SMS to ${LiberiaPhone.pretty(widget.phone)}.',
+            style: AppText.muted,
           ),
+          if (!_live) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: AppColors.amberSoft, borderRadius: BorderRadius.circular(12)),
+              child: const Row(
+                children: [
+                  Icon(Icons.info_outline, color: AppColors.amber, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text('Demo build: use code ${AppConfig.demoOtp}', style: TextStyle(fontWeight: FontWeight.w600)),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 24),
           TextField(
             controller: _code,
@@ -119,10 +185,10 @@ class _OtpScreenState extends State<OtpScreen> {
           const SizedBox(height: 12),
           Center(
             child: TextButton(
-              onPressed: _resendIn > 0
+              onPressed: _resendIn > 0 || _sending
                   ? null
                   : () {
-                      _startTimer();
+                      _send();
                       showSnack(context, 'A new code is on its way.');
                     },
               child: Text(_resendIn > 0 ? 'Resend code in ${_resendIn}s' : 'Resend code'),

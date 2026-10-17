@@ -76,8 +76,7 @@ class DriverDrawer extends StatelessWidget {
             leading: const Icon(Icons.hail, color: AppColors.navy),
             title: const Text('Switch to rider mode', style: TextStyle(fontWeight: FontWeight.w700)),
             onTap: () {
-              final drv = context.read<DriverController>();
-              if (drv.online) drv.toggleOnline();
+              context.read<DriverController>().detach();
               Navigator.pop(context);
               context.read<AppState>().setMode(AppMode.rider);
             },
@@ -86,8 +85,7 @@ class DriverDrawer extends StatelessWidget {
             leading: const Icon(Icons.logout, color: AppColors.red),
             title: const Text('Log out', style: TextStyle(color: AppColors.red, fontWeight: FontWeight.w700)),
             onTap: () {
-              final drv = context.read<DriverController>();
-              if (drv.online) drv.toggleOnline();
+              context.read<DriverController>().detach();
               Navigator.pop(context);
               context.read<AppState>().logout();
             },

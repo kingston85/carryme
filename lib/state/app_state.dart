@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../backend/backend.dart';
 import '../models/payment.dart';
 import '../models/place.dart';
 import '../models/ride.dart';
@@ -77,6 +78,10 @@ class AppState extends ChangeNotifier {
       contacts = _decodeList(p.getString('contacts'), EmergencyContact.fromJson);
     } catch (e) {
       debugPrint('CarryMe: could not load saved data: $e');
+    }
+    // In live mode the Firebase sign-in is the source of truth.
+    if (Backend.enabled && Backend.auth.currentUser == null && user != null) {
+      user = null;
     }
     // Short pause so the splash screen is visible.
     await Future<void>.delayed(const Duration(milliseconds: 900));
@@ -159,6 +164,7 @@ class AppState extends ChangeNotifier {
   }
 
   void logout() {
+    if (Backend.enabled) Backend.auth.signOut();
     user = null;
     mode = AppMode.rider;
     _changed();

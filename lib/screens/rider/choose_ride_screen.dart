@@ -448,7 +448,7 @@ class _ChooseRideScreenState extends State<ChooseRideScreen> {
       Navigator.popUntil(context, (r) => r.isFirst);
       return;
     }
-    ride.requestRide();
+    ride.requestRide(riderName: app.user?.name ?? '', riderPhone: app.user?.phone ?? '');
     Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const TripScreen()));
   }
 }

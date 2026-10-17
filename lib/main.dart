@@ -3,13 +3,16 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'app.dart';
+import 'backend/backend.dart';
 import 'state/app_state.dart';
 import 'state/driver_controller.dart';
 import 'state/ride_controller.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  // Live mode if Firebase is configured, otherwise demo mode.
+  await Backend.init();
   runApp(
     MultiProvider(
       providers: [

@@ -48,6 +48,8 @@ class _TripCompleteScreenState extends State<TripCompleteScreen> {
       }
     }
     app.addHistory(record.copyWith(rating: _rating, tipLrd: _tip));
+    final comment = [..._compliments, if (_comment.text.trim().isNotEmpty) _comment.text.trim()].join('; ');
+    ride.submitRating(rating: _rating, tipLrd: _tip, comment: comment);
     ride.clear();
     showSnack(context, 'Thanks for riding with CarryMe!');
     Navigator.popUntil(context, (r) => r.isFirst);

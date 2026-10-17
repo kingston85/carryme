@@ -1,0 +1,193 @@
+rules_version = '2';
+
+// CarryMe security rules.
+// Paste this into Firebase console > Firestore Database > Rules > Publish,
+// or deploy with:  firebase deploy --only firestore:rules
+//
+// What these rules guarantee:
+//  - People can only read and edit their own profile.
+//  - Only drivers YOU have approved (approved: true, set in the console) can
+//    see open ride requests and accept them, and only for their vehicle type.
+//  - A ride can only move forward in the right order:
+//      searching -> accepted -> arrived -> in_progress -> completed
+//    and only the right person can make each step.
+//  - A trip can only start when the driver enters the rider's real PIN.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isMe(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function driverPath() {
+      return /databases/$(database)/documents/drivers/$(request.auth.uid);
+    }
+
+    function isApprovedDriver() {
+      return signedIn() && exists(driverPath()) && get(driverPath()).data.approved == true;
+    }
+
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    // ---------------------------------------------------------------- users
+    match /users/{uid} {
+      allow read: if isMe(uid);
+      allow create: if isMe(uid)
+        && request.resource.data.phone == request.auth.token.phone_number;
+      allow update: if isMe(uid)
+        && request.resource.data.phone == resource.data.phone;
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------- drivers
+    match /drivers/{uid} {
+      allow read: if isMe(uid);
+
+      // New drivers always start unapproved.
+      allow create: if isMe(uid)
+        && request.resource.data.approved == false
+        && request.resource.data.phone == request.auth.token.phone_number;
+
+      // Drivers can never approve themselves, change their rating or trip
+      // count, or swap vehicle / plate after approval.
+      allow update: if isMe(uid)
+        && !changedKeys().hasAny(['approved', 'rating', 'trips', 'phone'])
+        && (resource.data.approved == false
+            || !changedKeys().hasAny(['vehicleType', 'plate']));
+
+      allow delete: if false;
+    }
+
+    // ---------------------------------------------------------------- rides
+    match /rides/{rideId} {
+
+      function isRider() {
+        return resource.data.riderId == request.auth.uid;
+      }
+
+      // driverId is always present (null until a driver accepts).
+      function isDriver() {
+        return resource.data.driverId == request.auth.uid;
+      }
+
+      function newStatus() {
+        return request.resource.data.status;
+      }
+
+      function pinPath() {
+        return /databases/$(database)/documents/rides/$(rideId)/secret/pin;
+      }
+
+      allow read: if signedIn() && (
+        resource.data.riderId == request.auth.uid
+        || resource.data.driverId == request.auth.uid
+        || (resource.data.status == 'searching' && isApprovedDriver())
+      );
+
+      allow create: if signedIn()
+        && request.resource.data.riderId == request.auth.uid
+        && request.resource.data.status == 'searching'
+        && request.resource.data.get('driverId', null) == null
+        && request.resource.data.vehicle in ['penPen', 'keke', 'sharedTaxi', 'taxi', 'comfort']
+        && request.resource.data.fareLrd is number
+        && request.resource.data.fareLrd > 0
+        && request.resource.data.fareLrd < 1000000;
+
+      // --- rider actions
+      function riderCancels() {
+        return isRider()
+          && resource.data.status in ['searching', 'accepted', 'arrived']
+          && newStatus() == 'cancelled'
+          && request.resource.data.cancelledBy == 'rider'
+          && changedKeys().hasOnly(['status', 'cancelReason', 'cancelledBy', 'updatedAt']);
+      }
+
+      function riderRates() {
+        return isRider()
+          && resource.data.status == 'completed'
+          && changedKeys().hasOnly(['riderRating', 'tipLrd', 'riderComment', 'updatedAt'])
+          && request.resource.data.riderRating is int
+          && request.resource.data.riderRating >= 1
+          && request.resource.data.riderRating <= 5;
+      }
+
+      // --- driver actions
+      function driverAccepts() {
+        return resource.data.status == 'searching'
+          && isApprovedDriver()
+          && get(driverPath()).data.vehicleType == resource.data.vehicle
+          && resource.data.riderId != request.auth.uid
+          && newStatus() == 'accepted'
+          && request.resource.data.driverId == request.auth.uid
+          && changedKeys().hasOnly([
+               'status', 'driverId', 'driverName', 'driverPhone', 'vehicleDesc',
+               'colorName', 'plate', 'driverRating', 'driverTrips',
+               'driverLat', 'driverLng', 'acceptedAt', 'updatedAt']);
+      }
+
+      function driverMoves() {
+        return isDriver()
+          && resource.data.status in ['accepted', 'arrived', 'in_progress']
+          && changedKeys().hasOnly(['driverLat', 'driverLng', 'updatedAt']);
+      }
+
+      function driverArrives() {
+        return isDriver()
+          && resource.data.status == 'accepted'
+          && newStatus() == 'arrived'
+          && changedKeys().hasOnly(['status', 'arrivedAt', 'updatedAt', 'driverLat', 'driverLng']);
+      }
+
+      function driverStarts() {
+        return isDriver()
+          && resource.data.status == 'arrived'
+          && newStatus() == 'in_progress'
+          && changedKeys().hasOnly(['status', 'pinEntered', 'startedAt', 'updatedAt'])
+          && request.resource.data.pinEntered == get(pinPath()).data.pin;
+      }
+
+      function driverCompletes() {
+        return isDriver()
+          && resource.data.status == 'in_progress'
+          && newStatus() == 'completed'
+          && changedKeys().hasOnly(['status', 'completedAt', 'updatedAt', 'driverLat', 'driverLng']);
+      }
+
+      function driverCancels() {
+        return isDriver()
+          && resource.data.status in ['accepted', 'arrived']
+          && newStatus() == 'cancelled'
+          && request.resource.data.cancelledBy == 'driver'
+          && changedKeys().hasOnly(['status', 'cancelReason', 'cancelledBy', 'updatedAt']);
+      }
+
+      allow update: if signedIn() && (
+        riderCancels() || riderRates()
+        || driverAccepts() || driverMoves() || driverArrives()
+        || driverStarts() || driverCompletes() || driverCancels()
+      );
+
+      allow delete: if false;
+
+      // The 4-digit ride PIN. Only the rider can read it; the driver never
+      // sees it - the rules above compare what the driver types against it.
+      match /secret/{docId} {
+        allow read: if signedIn()
+          && get(/databases/$(database)/documents/rides/$(rideId)).data.riderId == request.auth.uid;
+        allow create: if signedIn()
+          && docId == 'pin'
+          && getAfter(/databases/$(database)/documents/rides/$(rideId)).data.riderId == request.auth.uid
+          && request.resource.data.pin is string
+          && request.resource.data.pin.size() == 4;
+        allow update, delete: if false;
+      }
+    }
+  }
+}

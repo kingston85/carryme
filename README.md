@@ -2,7 +2,9 @@
 
 An Uber-style Android app (Flutter) for booking **pen-pen, keke, shared taxi seats, taxis and comfort cars** in Monrovia and across Liberia, with prices in **L$ and US$** and payment by **cash, Orange Money, MTN MoMo or an in-app wallet**.
 
-This repository is a complete, working **demo build**: every screen works and rides are simulated on the phone, so you can install it today, show it to partners and investors, and then connect a real backend (see *Going live* below).
+The app has two modes:
+- **Demo mode** (default): every screen works and drivers are simulated on the phone. Login code `123456`.
+- **Live mode** with **Firebase**: real SMS login, and real riders and drivers matched through a Firestore database with strict security rules. Set it up with **[FIREBASE_SETUP.md](FIREBASE_SETUP.md)**.
 
 ---
 
@@ -15,6 +17,7 @@ This repository is a complete, working **demo build**: every screen works and ri
 5. Unzip it, copy `app-release.apk` to an Android phone and open it. Allow "Install unknown apps" when asked.
 
 Demo login: any name, any valid Liberian number (e.g. `0777 123 456`), code **123456**.
+After adding the two Firebase secrets (see FIREBASE_SETUP.md), the same build process produces the live app.
 
 If a build fails, open the failed step in Actions, copy the red error lines, and send them back for a fix.
 
@@ -87,18 +90,23 @@ lib/
   state/       AppState (account, settings, history), RideController, DriverController
   screens/     auth/, rider/, driver/
   widgets/     map widget and shared UI
-tool/patch_android.py         adds permissions + app name to the Android project
+  backend/     Firebase start-up, phone sign-in, every Firestore read/write
+  firebase_options.dart   generated from google-services.json (demo stub in the repo)
+firestore.rules               database security rules - paste into the Firebase console
+FIREBASE_SETUP.md             step-by-step Firebase guide
+tool/gen_firebase_options.py  turns google-services.json into lib/firebase_options.dart
+tool/patch_android.py         adds permissions, app name and minSdk 23 to the Android project
 .github/workflows/build-apk.yml   builds the APK on GitHub
 ```
 
 ---
 
-## Going live — what the demo still needs
+## Going live: what's left
 
-The demo simulates drivers on the phone. To run a real service you need:
+Real-time dispatch and SMS login are done with Firebase (see FIREBASE_SETUP.md). Still to do:
 
-1. **Backend + real-time dispatch** — e.g. Firebase (Auth, Firestore, Cloud Functions) or your own server. Riders write a ride request; nearby online drivers receive it; status updates stream back. Replace the timers in `RideController` and `DriverController` with these calls.
-2. **Phone verification** — replace the demo code `123456` with real SMS OTP (Firebase phone auth, or an SMS gateway that delivers reliably on Orange and Lonestar MTN).
+1. **Push notifications and server checks**: Cloud Functions for ride alerts when the driver app is closed, average ratings and server-side fare checks.
+2. **Driver document uploads**: Firebase Storage.
 3. **Mobile money** — merchant accounts and APIs with Orange Money Liberia and MTN MoMo, called from your server (never from the app).
 4. **Maps at scale** — the free OpenStreetMap tile, OSRM and Nominatim servers are for testing only. Use a paid provider (e.g. MapTiler, Stadia, Mapbox) or self-host before launch.
 5. **Admin dashboard** — approve drivers' documents, set fares and the exchange rate, handle support and refunds.

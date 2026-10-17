@@ -56,7 +56,28 @@ def main() -> int:
 
     MANIFEST.write_text(xml, encoding="utf-8")
     print("AndroidManifest.xml patched for CarryMe")
+    patch_min_sdk()
     return 0
+
+
+def patch_min_sdk() -> None:
+    """Firebase needs Android 6.0+ (minSdk 23)."""
+    for path in (pathlib.Path("android/app/build.gradle.kts"), pathlib.Path("android/app/build.gradle")):
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "CARRYME_MIN_SDK" in text:
+            return
+        kts = path.suffix == ".kts"
+        expr = "maxOf(23, flutter.minSdkVersion)" if kts else "Math.max(23, flutter.minSdkVersion)"
+        new = re.sub(r"(minSdk(?:Version)?\s*=?\s*)flutter\.minSdkVersion", r"\g<1>" + expr + " // CARRYME_MIN_SDK", text, count=1)
+        if new == text:
+            print(f"WARNING: could not find minSdk in {path}; set it to 23 or higher by hand")
+            return
+        path.write_text(new, encoding="utf-8")
+        print(f"{path}: minSdk set to at least 23")
+        return
+    print("WARNING: android/app/build.gradle(.kts) not found")
 
 
 if __name__ == "__main__":
