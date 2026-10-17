@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../config/app_config.dart';
@@ -56,10 +58,12 @@ class PhoneAuth {
     if (id == null) return 'The code has not been sent yet. Please wait a moment.';
     try {
       final credential = PhoneAuthProvider.credential(verificationId: id, smsCode: code.trim());
-      await Backend.auth.signInWithCredential(credential);
+      await Backend.auth.signInWithCredential(credential).timeout(const Duration(seconds: 25));
       return null;
     } on FirebaseAuthException catch (e) {
       return message(e);
+    } on TimeoutException {
+      return 'Firebase did not answer while checking the code (step 2 of 3). Check your internet and try again.';
     } catch (e) {
       return 'Sign-in failed: $e';
     }
@@ -89,7 +93,7 @@ class PhoneAuth {
       case 'network-request-failed':
         return 'No internet connection. Check your data or Wi-Fi.';
       default:
-        return e.message ?? 'Sign-in failed (${e.code}).';
+        return '${e.message ?? 'Sign-in failed.'} [${e.code}]';
     }
   }
 }

@@ -34,13 +34,23 @@ class _OtpScreenState extends State<OtpScreen> {
   bool _waitingForSend = false; // code typed before Firebase was ready
   bool _slow = false;
   Timer? _slowTimer;
+  Timer? _giveUpTimer;
+  StreamSubscription<dynamic>? _authSub;
   String? _error;
+  String _step = '';
 
   bool get _live => Backend.enabled;
 
   @override
   void initState() {
     super.initState();
+    if (_live) {
+      // Some phones sign in without the code-check call ever returning, so
+      // also watch Firebase's sign-in state directly.
+      _authSub = Backend.auth.authStateChanges().listen((user) {
+        if (user != null && user.phoneNumber == widget.phone) _signedIn();
+      });
+    }
     _send();
   }
 
@@ -51,17 +61,33 @@ class _OtpScreenState extends State<OtpScreen> {
       _sending = true;
       _slow = false;
       _error = null;
+      _step = 'Step 1 of 3: asking Firebase to send the code…';
     });
     _slowTimer?.cancel();
     _slowTimer = Timer(const Duration(seconds: 20), () {
       if (mounted && _sending) setState(() => _slow = true);
     });
+    _giveUpTimer?.cancel();
+    _giveUpTimer = Timer(const Duration(seconds: 45), () {
+      if (!mounted || !_sending) return;
+      setState(() {
+        _sending = false;
+        _slow = false;
+        _waitingForSend = false;
+        _verifying = false;
+        _step = '';
+        _error = 'Firebase did not answer (step 1 of 3: sending the code). '
+            'Check your internet, then tap "Resend code". If it keeps happening, send a screenshot of this screen.';
+      });
+    });
     _auth.sendCode(
       widget.phone,
       onCodeSent: () {
         if (!mounted) return;
+        _giveUpTimer?.cancel();
         final pending = _waitingForSend;
         setState(() {
+          _step = '';
           _sending = false;
           _slow = false;
           _waitingForSend = false;
@@ -72,8 +98,10 @@ class _OtpScreenState extends State<OtpScreen> {
       },
       onAutoVerified: _signedIn,
       onError: (m) {
+        _giveUpTimer?.cancel();
         if (mounted) {
           setState(() {
+            _step = '';
             _sending = false;
             _slow = false;
             _waitingForSend = false;
@@ -98,6 +126,8 @@ class _OtpScreenState extends State<OtpScreen> {
   void dispose() {
     _timer?.cancel();
     _slowTimer?.cancel();
+    _giveUpTimer?.cancel();
+    _authSub?.cancel();
     _code.dispose();
     super.dispose();
   }
@@ -117,6 +147,7 @@ class _OtpScreenState extends State<OtpScreen> {
     setState(() {
       _verifying = true;
       _error = null;
+      _step = 'Step 2 of 3: checking the code…';
     });
     String? error;
     if (_live) {
@@ -129,6 +160,7 @@ class _OtpScreenState extends State<OtpScreen> {
     if (error != null) {
       setState(() {
         _verifying = false;
+        _step = '';
         _error = error;
       });
       return;
@@ -140,7 +172,11 @@ class _OtpScreenState extends State<OtpScreen> {
   Future<void> _signedIn() async {
     if (_finished || !mounted) return;
     _finished = true;
-    setState(() => _verifying = true);
+    _giveUpTimer?.cancel();
+    setState(() {
+      _verifying = true;
+      _step = 'Step 3 of 3: saving your profile…';
+    });
     if (_live) {
       try {
         await FirestoreApi.saveUser(
@@ -219,6 +255,10 @@ class _OtpScreenState extends State<OtpScreen> {
               if (v.length == 6) _verify();
             },
           ),
+          if (_step.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text(_step, style: AppText.small),
+          ],
           if (_error != null) ...[
             const SizedBox(height: 10),
             Text(_error!, style: const TextStyle(color: AppColors.red, fontWeight: FontWeight.w600)),
