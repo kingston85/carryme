@@ -71,8 +71,13 @@ class AppConfig {
   static const String supportPhone = '+231770000000'; // TODO: your support line
   static const String supportWhatsApp = '231770000000'; // TODO: your WhatsApp
 
-  /// Demo-only OTP. Replace with real SMS verification (e.g. Firebase Auth).
+  /// Demo-only OTP (used when Firebase is not configured).
   static const String demoOtp = '123456';
+
+  /// Firebase test phone numbers (Authentication > Phone > Phone numbers for
+  /// testing). For these the app skips Google's device/robot check, so they
+  /// work on any phone. Real numbers always go through the normal check.
+  static const List<String> testPhoneNumbers = ['+231770000001', '+231770000002'];
 
   /// Map + routing providers. The public OSM / OSRM / Nominatim servers are
   /// fine for testing; use a paid or self-hosted provider in production.

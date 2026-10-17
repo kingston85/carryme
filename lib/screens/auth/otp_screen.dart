@@ -31,6 +31,9 @@ class _OtpScreenState extends State<OtpScreen> {
   bool _verifying = false;
   bool _sending = false;
   bool _finished = false;
+  bool _waitingForSend = false; // code typed before Firebase was ready
+  bool _slow = false;
+  Timer? _slowTimer;
   String? _error;
 
   bool get _live => Backend.enabled;
@@ -46,18 +49,35 @@ class _OtpScreenState extends State<OtpScreen> {
     if (!_live) return;
     setState(() {
       _sending = true;
+      _slow = false;
       _error = null;
+    });
+    _slowTimer?.cancel();
+    _slowTimer = Timer(const Duration(seconds: 20), () {
+      if (mounted && _sending) setState(() => _slow = true);
     });
     _auth.sendCode(
       widget.phone,
       onCodeSent: () {
-        if (mounted) setState(() => _sending = false);
+        if (!mounted) return;
+        final pending = _waitingForSend;
+        setState(() {
+          _sending = false;
+          _slow = false;
+          _waitingForSend = false;
+          _verifying = false;
+        });
+        // The code was typed while we were still waiting - check it now.
+        if (pending) _verify();
       },
       onAutoVerified: _signedIn,
       onError: (m) {
         if (mounted) {
           setState(() {
             _sending = false;
+            _slow = false;
+            _waitingForSend = false;
+            _verifying = false;
             _error = m;
           });
         }
@@ -77,12 +97,23 @@ class _OtpScreenState extends State<OtpScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _slowTimer?.cancel();
     _code.dispose();
     super.dispose();
   }
 
   Future<void> _verify() async {
-    if (_verifying || _finished) return;
+    if (_finished) return;
+    if (_live && !_auth.codeSent) {
+      // Firebase hasn't confirmed sending yet: verify as soon as it does.
+      setState(() {
+        _waitingForSend = true;
+        _verifying = true;
+        _error = null;
+      });
+      return;
+    }
+    if (_verifying) return;
     setState(() {
       _verifying = true;
       _error = null;
@@ -143,6 +174,18 @@ class _OtpScreenState extends State<OtpScreen> {
                 : 'We sent a 6-digit code by SMS to ${LiberiaPhone.pretty(widget.phone)}.',
             style: AppText.muted,
           ),
+          if (_live && _slow) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: AppColors.amberSoft, borderRadius: BorderRadius.circular(12)),
+              child: const Text(
+                'This is taking longer than usual. If a browser window opened, finish the '
+                '"I\'m not a robot" check there. Also check your internet connection.',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
           if (!_live) ...[
             const SizedBox(height: 14),
             Container(

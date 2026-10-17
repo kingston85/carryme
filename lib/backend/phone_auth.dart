@@ -1,11 +1,14 @@
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../config/app_config.dart';
 import 'backend.dart';
 
 /// Firebase phone (SMS code) sign-in.
 class PhoneAuth {
   String? _verificationId;
   int? _resendToken;
+
+  bool get codeSent => _verificationId != null;
 
   /// Sends the SMS. [onAutoVerified] fires when Android reads the SMS by
   /// itself and signs the user in without typing the code.
@@ -16,6 +19,10 @@ class PhoneAuth {
     required void Function(String message) onError,
   }) async {
     try {
+      // Test numbers skip the Play Integrity / reCAPTCHA check.
+      await Backend.auth.setSettings(
+        appVerificationDisabledForTesting: AppConfig.testPhoneNumbers.contains(phoneE164),
+      );
       await Backend.auth.verifyPhoneNumber(
         phoneNumber: phoneE164,
         forceResendingToken: _resendToken,
